@@ -80,6 +80,7 @@
       </section>
 
       <p v-if="error" class="error-text">{{ error }}</p>
+      <p v-if="successMessage" class="success-text">{{ successMessage }}</p>
 
       <section v-if="viewingCheck" class="form-panel">
         <div class="form-grid">
@@ -213,6 +214,7 @@ const editingCheck = ref(null)
 const viewingCheck = ref(null)
 const error = ref('')
 const submitting = ref(false)
+const successMessage = ref('')
 
 const listColumns = [
   { key: 'checkNo', label: '盘点单号' },
@@ -247,6 +249,7 @@ function startNewCheck() {
   currentItems.value = []
   viewingCheck.value = null
   error.value = ''
+  successMessage.value = ''
 }
 
 function addAllIngredients() {
@@ -291,6 +294,7 @@ function backToList() {
   viewingCheck.value = null
   currentItems.value = []
   error.value = ''
+  successMessage.value = ''
   loadChecks()
 }
 
@@ -304,7 +308,7 @@ function isValidActualStock(item) {
 
 function onActualStockInput(item) {
   recalcDiff(item)
-  error.value = ''
+  validateAllItems()
 }
 
 function validateAllItems() {
@@ -314,6 +318,7 @@ function validateAllItems() {
     error.value = `以下原料的实盘数量不正确：${names}`
     return false
   }
+  error.value = ''
   return true
 }
 
@@ -362,6 +367,7 @@ async function submitCheck() {
     return
   }
   error.value = ''
+  successMessage.value = ''
   submitting.value = true
   try {
     let checkId = editingCheck.value.id
@@ -380,7 +386,11 @@ async function submitCheck() {
       await stockChecksApi.update(checkId, payload)
     }
     await stockChecksApi.submit(checkId)
-    backToList()
+    const detailRes = await stockChecksApi.get(checkId)
+    viewingCheck.value = detailRes.data
+    currentItems.value = detailRes.data.items
+    editingCheck.value = null
+    successMessage.value = '盘点提交成功！库存已更新，出入库记录已生成。'
   } catch (err) {
     error.value = err.response?.data?.message || '提交失败'
   } finally {
@@ -399,6 +409,7 @@ async function editCheck(id) {
   currentItems.value = data.items.map((it) => ({ ...it }))
   viewingCheck.value = null
   error.value = ''
+  successMessage.value = ''
 }
 
 async function viewCheck(id) {
@@ -407,6 +418,7 @@ async function viewCheck(id) {
   currentItems.value = res.data.items
   editingCheck.value = null
   error.value = ''
+  successMessage.value = ''
 }
 
 async function deleteCheck(id) {
@@ -429,5 +441,14 @@ onMounted(async () => {
 button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.success-text {
+  color: #17713d;
+  background: #dff5e7;
+  padding: 10px 14px;
+  border-radius: 7px;
+  margin-bottom: 18px;
+  font-weight: 500;
 }
 </style>
