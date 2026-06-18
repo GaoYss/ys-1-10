@@ -12,6 +12,8 @@
         </label>
       </div>
 
+      <p v-if="successMessage" class="success-text">{{ successMessage }}</p>
+
       <DataTable :columns="listColumns" :rows="checks">
         <template #status="{ row }">
           <StatusBadge
@@ -198,7 +200,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
 
 import { inventoryApi } from '../api/inventory'
 import { stockChecksApi } from '../api/stockChecks'
@@ -215,6 +217,16 @@ const viewingCheck = ref(null)
 const error = ref('')
 const submitting = ref(false)
 const successMessage = ref('')
+let successTimer = null
+
+function showSuccessWithAutoDismiss(message, duration = 3000) {
+  successMessage.value = message
+  if (successTimer) clearTimeout(successTimer)
+  successTimer = setTimeout(() => {
+    successMessage.value = ''
+    successTimer = null
+  }, duration)
+}
 
 const listColumns = [
   { key: 'checkNo', label: '盘点单号' },
@@ -250,6 +262,10 @@ function startNewCheck() {
   viewingCheck.value = null
   error.value = ''
   successMessage.value = ''
+  if (successTimer) {
+    clearTimeout(successTimer)
+    successTimer = null
+  }
 }
 
 function addAllIngredients() {
@@ -295,6 +311,10 @@ function backToList() {
   currentItems.value = []
   error.value = ''
   successMessage.value = ''
+  if (successTimer) {
+    clearTimeout(successTimer)
+    successTimer = null
+  }
   loadChecks()
 }
 
@@ -346,7 +366,11 @@ async function saveDraft() {
       const res = await stockChecksApi.create(payload)
       editingCheck.value.id = res.data.id
     }
-    backToList()
+    editingCheck.value = null
+    viewingCheck.value = null
+    currentItems.value = []
+    await loadChecks()
+    showSuccessWithAutoDismiss('草稿保存成功！')
   } catch (err) {
     error.value = err.response?.data?.message || '保存失败'
   } finally {
@@ -389,7 +413,7 @@ async function submitCheck() {
     viewingCheck.value = detailRes.data
     currentItems.value = detailRes.data.items
     editingCheck.value = null
-    successMessage.value = '盘点提交成功！库存已更新，出入库记录已生成。'
+    showSuccessWithAutoDismiss('盘点提交成功！库存已更新，出入库记录已生成。')
   } catch (err) {
     error.value = err.response?.data?.message || '提交失败'
   } finally {
@@ -409,6 +433,10 @@ async function editCheck(id) {
   viewingCheck.value = null
   error.value = ''
   successMessage.value = ''
+  if (successTimer) {
+    clearTimeout(successTimer)
+    successTimer = null
+  }
 }
 
 async function viewCheck(id) {
@@ -418,6 +446,10 @@ async function viewCheck(id) {
   editingCheck.value = null
   error.value = ''
   successMessage.value = ''
+  if (successTimer) {
+    clearTimeout(successTimer)
+    successTimer = null
+  }
 }
 
 async function deleteCheck(id) {
@@ -428,6 +460,13 @@ async function deleteCheck(id) {
 
 onMounted(async () => {
   await Promise.all([loadChecks(), loadIngredients()])
+})
+
+onUnmounted(() => {
+  if (successTimer) {
+    clearTimeout(successTimer)
+    successTimer = null
+  }
 })
 </script>
 
