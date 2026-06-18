@@ -1,6 +1,8 @@
+import time
 from datetime import datetime
 
 from flask import Blueprint, jsonify, request
+from sqlalchemy.exc import IntegrityError
 
 from ..extensions import db
 from ..models import Ingredient, StockCheck, StockCheckItem, StockRecord
@@ -11,6 +13,19 @@ stock_checks_bp = Blueprint("stock_checks", __name__)
 def generate_check_no():
     now = datetime.utcnow()
     return f"PD{now.strftime('%Y%m%d%H%M%S')}"
+
+
+def generate_unique_check_no(max_retries=10):
+    for i in range(max_retries):
+        check_no = generate_check_no()
+        if i > 0:
+            check_no = f"{check_no}{i}"
+        existing = StockCheck.query.filter_by(check_no=check_no).first()
+        if not existing:
+            return check_no
+        time.sleep(0.01)
+    timestamp = int(time.time() * 1000)
+    return f"PD{timestamp}"
 
 
 def calc_diff(system_stock, actual_stock):
@@ -46,31 +61,40 @@ def create_stock_check():
     note = data.get("note", "")
     items_data = data.get("items", [])
 
-    check = StockCheck(
-        check_no=generate_check_no(),
-        status="draft",
-        operator=operator,
-        note=note,
-    )
-    db.session.add(check)
-    db.session.flush()
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            check = StockCheck(
+                check_no=generate_unique_check_no(),
+                status="draft",
+                operator=operator,
+                note=note,
+            )
+            db.session.add(check)
+            db.session.flush()
 
-    for item_data in items_data:
-        ingredient = Ingredient.query.get_or_404(item_data["ingredientId"])
-        actual_stock = float(item_data.get("actualStock", ingredient.stock))
-        diff_quantity, diff_type = calc_diff(ingredient.stock, actual_stock)
-        item = StockCheckItem(
-            stock_check_id=check.id,
-            ingredient_id=ingredient.id,
-            system_stock=ingredient.stock,
-            actual_stock=actual_stock,
-            diff_quantity=diff_quantity,
-            diff_type=diff_type,
-        )
-        db.session.add(item)
+            for item_data in items_data:
+                ingredient = Ingredient.query.get_or_404(item_data["ingredientId"])
+                actual_stock = float(item_data.get("actualStock", ingredient.stock))
+                diff_quantity, diff_type = calc_diff(ingredient.stock, actual_stock)
+                item = StockCheckItem(
+                    stock_check_id=check.id,
+                    ingredient_id=ingredient.id,
+                    system_stock=ingredient.stock,
+                    actual_stock=actual_stock,
+                    diff_quantity=diff_quantity,
+                    diff_type=diff_type,
+                )
+                db.session.add(item)
 
-    db.session.commit()
-    return check.to_dict(include_items=True), 201
+            db.session.commit()
+            return check.to_dict(include_items=True), 201
+        except IntegrityError:
+            db.session.rollback()
+            if attempt == max_attempts - 1:
+                raise
+            time.sleep(0.05)
+    return {"message": "创建盘点单失败，请重试"}, 500
 
 
 @stock_checks_bp.put("/<int:check_id>")

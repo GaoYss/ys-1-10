@@ -79,6 +79,8 @@
         </div>
       </section>
 
+      <p v-if="error" class="error-text">{{ error }}</p>
+
       <section v-if="viewingCheck" class="form-panel">
         <div class="form-grid">
           <label>
@@ -140,8 +142,9 @@
                   type="number"
                   min="0"
                   step="0.01"
+                  :class="{ 'input-error': !isValidActualStock(item) }"
                   style="max-width: 140px;"
-                  @input="recalcDiff(item)"
+                  @input="onActualStockInput(item)"
                 />
                 <span v-else>{{ item.actualStock }} {{ item.unit }}</span>
               </td>
@@ -176,16 +179,17 @@
       </div>
 
       <div v-if="editingCheck" class="line-editor" style="justify-content: flex-end; margin-top: 18px;">
-        <button class="secondary-btn" @click="backToList">取消</button>
-        <button class="primary-btn" @click="saveDraft" style="margin-left: 10px;">
+        <button class="secondary-btn" @click="backToList" :disabled="submitting">取消</button>
+        <button class="primary-btn" @click="saveDraft" style="margin-left: 10px;" :disabled="submitting">
           {{ editingCheck.id ? '保存草稿' : '创建草稿' }}
         </button>
         <button
           class="primary-btn"
           style="margin-left: 10px; background: #17713d;"
           @click="submitCheck"
+          :disabled="submitting"
         >
-          提交盘点
+          {{ submitting ? '提交中...' : '提交盘点' }}
         </button>
       </div>
     </template>
@@ -208,6 +212,7 @@ const onlyDraft = ref(false)
 const editingCheck = ref(null)
 const viewingCheck = ref(null)
 const error = ref('')
+const submitting = ref(false)
 
 const listColumns = [
   { key: 'checkNo', label: '盘点单号' },
@@ -241,6 +246,7 @@ function startNewCheck() {
   })
   currentItems.value = []
   viewingCheck.value = null
+  error.value = ''
 }
 
 function addAllIngredients() {
@@ -284,7 +290,31 @@ function backToList() {
   editingCheck.value = null
   viewingCheck.value = null
   currentItems.value = []
+  error.value = ''
   loadChecks()
+}
+
+function isValidActualStock(item) {
+  const val = item.actualStock
+  if (val === null || val === undefined || val === '') return false
+  if (isNaN(Number(val))) return false
+  if (Number(val) < 0) return false
+  return true
+}
+
+function onActualStockInput(item) {
+  recalcDiff(item)
+  error.value = ''
+}
+
+function validateAllItems() {
+  const invalidItems = currentItems.value.filter((it) => !isValidActualStock(it))
+  if (invalidItems.length > 0) {
+    const names = invalidItems.map((it) => it.ingredientName).join('、')
+    error.value = `以下原料的实盘数量不正确：${names}`
+    return false
+  }
+  return true
 }
 
 async function saveDraft() {
@@ -292,21 +322,32 @@ async function saveDraft() {
     alert('请添加盘点原料')
     return
   }
-  const payload = {
-    operator: editingCheck.value.operator,
-    note: editingCheck.value.note,
-    items: currentItems.value.map((it) => ({
-      ingredientId: it.ingredientId,
-      actualStock: it.actualStock
-    }))
+  if (!validateAllItems()) {
+    return
   }
-  if (editingCheck.value.id) {
-    await stockChecksApi.update(editingCheck.value.id, payload)
-  } else {
-    const res = await stockChecksApi.create(payload)
-    editingCheck.value.id = res.data.id
+  error.value = ''
+  submitting.value = true
+  try {
+    const payload = {
+      operator: editingCheck.value.operator,
+      note: editingCheck.value.note,
+      items: currentItems.value.map((it) => ({
+        ingredientId: it.ingredientId,
+        actualStock: it.actualStock
+      }))
+    }
+    if (editingCheck.value.id) {
+      await stockChecksApi.update(editingCheck.value.id, payload)
+    } else {
+      const res = await stockChecksApi.create(payload)
+      editingCheck.value.id = res.data.id
+    }
+    backToList()
+  } catch (err) {
+    error.value = err.response?.data?.message || '保存失败'
+  } finally {
+    submitting.value = false
   }
-  backToList()
 }
 
 async function submitCheck() {
@@ -314,9 +355,14 @@ async function submitCheck() {
     alert('请添加盘点原料')
     return
   }
+  if (!validateAllItems()) {
+    return
+  }
   if (!confirm('提交后将自动更新库存并生成出入库记录，是否确认提交？')) {
     return
   }
+  error.value = ''
+  submitting.value = true
   try {
     let checkId = editingCheck.value.id
     const payload = {
@@ -337,6 +383,8 @@ async function submitCheck() {
     backToList()
   } catch (err) {
     error.value = err.response?.data?.message || '提交失败'
+  } finally {
+    submitting.value = false
   }
 }
 
@@ -350,6 +398,7 @@ async function editCheck(id) {
   })
   currentItems.value = data.items.map((it) => ({ ...it }))
   viewingCheck.value = null
+  error.value = ''
 }
 
 async function viewCheck(id) {
@@ -357,6 +406,7 @@ async function viewCheck(id) {
   viewingCheck.value = res.data
   currentItems.value = res.data.items
   editingCheck.value = null
+  error.value = ''
 }
 
 async function deleteCheck(id) {
@@ -369,3 +419,15 @@ onMounted(async () => {
   await Promise.all([loadChecks(), loadIngredients()])
 })
 </script>
+
+<style scoped>
+.input-error {
+  border-color: #a72f25 !important;
+  background: #fff5f5 !important;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+</style>
