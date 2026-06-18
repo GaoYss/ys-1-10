@@ -318,7 +318,6 @@ function validateAllItems() {
     error.value = `以下原料的实盘数量不正确：${names}`
     return false
   }
-  error.value = ''
   return true
 }
 
